@@ -1,0 +1,5 @@
+*.db
+*.wal
+.blockade
+addrbook.json
+priv_validator_state.json
