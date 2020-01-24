@@ -2,13 +2,12 @@ package kvstore
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
 
 	"github.com/dgraph-io/badger"
 	"github.com/golang/protobuf/proto"
-	"github.com/zdavep/kvstore-txfmt"
+	txfmt "github.com/zdavep/kvstore-txfmt"
 
 	abci "github.com/tendermint/tendermint/abci/types"
 	"github.com/tendermint/tendermint/libs/log"
@@ -46,15 +45,21 @@ func (app *App) Info(req abci.RequestInfo) abci.ResponseInfo {
 
 // CheckTx determines whether a transaction can be committed.
 func (app *App) CheckTx(req abci.RequestCheckTx) abci.ResponseCheckTx {
-	app.log.Info("CheckTx")
-	return abci.ResponseCheckTx{
-		Code: app.isValid(req.Tx),
+	// Decode transaction
+	entries := &txfmt.Entries{}
+	if err := proto.Unmarshal(req.Tx, entries); err != nil {
+		app.log.Error("failed to unmarshal tx", "err", err)
+		return abci.ResponseCheckTx{Code: codeInvalidFormat, Log: "error"}
 	}
+	// Validate
+	if code := app.isValid(entries); code != codeSuccess {
+		return abci.ResponseCheckTx{Code: code, Log: "error"}
+	}
+	return abci.ResponseCheckTx{Log: "success"}
 }
 
 // BeginBlock starts a new database transaction.
 func (app *App) BeginBlock(req abci.RequestBeginBlock) abci.ResponseBeginBlock {
-	app.log.Info("BeginBlock")
 	app.batch = app.db.NewTransaction(true)
 	app.height = req.Header.Height
 	return abci.ResponseBeginBlock{}
@@ -62,30 +67,29 @@ func (app *App) BeginBlock(req abci.RequestBeginBlock) abci.ResponseBeginBlock {
 
 // DeliverTx sets a key-value pair in the current transaction.
 func (app *App) DeliverTx(req abci.RequestDeliverTx) abci.ResponseDeliverTx {
-	sum := sha256.Sum256(req.Tx)
-	app.log.Info("DeliverTx", "hash", fmt.Sprintf("%X", sum))
-	if code := app.isValid(req.Tx); code != codeSuccess {
-		return abci.ResponseDeliverTx{Code: code}
-	}
+	// Decode transaction
 	entries := &txfmt.Entries{}
 	if err := proto.Unmarshal(req.Tx, entries); err != nil {
 		app.log.Error("failed to unmarshal tx", "err", err)
-		return abci.ResponseDeliverTx{Code: codeInvalidFormat}
+		return abci.ResponseDeliverTx{Code: codeInvalidFormat, Log: "error"}
 	}
+	// Validate
+	if code := app.isValid(entries); code != codeSuccess {
+		return abci.ResponseDeliverTx{Code: code, Log: "error"}
+	}
+	// Store
 	for _, e := range entries.Entries {
-		app.log.Info("app.batch.Set")
 		if err := app.batch.Set(e.Key, e.Value); err != nil {
 			app.log.Error("unable to set value", "err", err)
-			return abci.ResponseDeliverTx{Code: codeDatabaseErr}
+			return abci.ResponseDeliverTx{Code: codeDatabaseErr, Log: "error"}
 		}
 	}
 	app.snapshotHeight()
-	return abci.ResponseDeliverTx{}
+	return abci.ResponseDeliverTx{Log: "success"}
 }
 
 // Commit writes the current batch to the database.
 func (app *App) Commit() abci.ResponseCommit {
-	app.log.Info("Commit")
 	if err := app.batch.Commit(); err != nil {
 		app.log.Error("error during transaction commit", "err", err)
 	}
@@ -94,7 +98,6 @@ func (app *App) Commit() abci.ResponseCommit {
 
 // Query fetches the value for a key from the database.
 func (app *App) Query(req abci.RequestQuery) (res abci.ResponseQuery) {
-	app.log.Info("Query")
 	res.Key = req.Data
 	var err error
 	if res.Value, err = app.get(req.Data); err != nil {
@@ -107,13 +110,7 @@ func (app *App) Query(req abci.RequestQuery) (res abci.ResponseQuery) {
 }
 
 // Determine whether a value can committed.
-func (app *App) isValid(tx []byte) uint32 {
-	// Decode transaction
-	entries := &txfmt.Entries{}
-	if err := proto.Unmarshal(tx, entries); err != nil {
-		app.log.Error("failed to unmarshal tx", "err", err)
-		return codeInvalidFormat
-	}
+func (app *App) isValid(entries *txfmt.Entries) uint32 {
 	// Check whether the key-value pair already exists.
 	for _, e := range entries.Entries {
 		existing, err := app.get(e.Key)
@@ -122,7 +119,7 @@ func (app *App) isValid(tx []byte) uint32 {
 			return codeDatabaseErr
 		}
 		if existing != nil && bytes.Equal(e.Value, existing) {
-			app.log.Info("isValid", "msg", "value already exists")
+			app.log.Error("isValid", "msg", "value already exists")
 			return codeDupValue
 		}
 	}

@@ -1,12 +1,15 @@
-FROM golang:1.13 as build
+FROM golang:1.13-buster as build
 
 WORKDIR /go/src/github.com/zdavep/kvstore
+
+RUN apt-get update && apt-get upgrade -y && apt-get install -y libleveldb-dev
 
 COPY go.* ./
 COPY cmd ./cmd/
 COPY internal ./internal/
-RUN go build -o /go/bin/kvstore cmd/kvstore/main.go
+RUN go build -tags cleveldb -o /go/bin/kvstore cmd/kvstore/main.go
 
-FROM gcr.io/distroless/base:debug
+FROM debian:buster
+RUN apt-get update && apt-get upgrade -y && apt-get install -y libleveldb-dev
 COPY --from=build /go/bin/kvstore /
 ENTRYPOINT ["/kvstore"]
