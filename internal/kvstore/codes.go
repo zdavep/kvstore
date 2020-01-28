@@ -5,5 +5,6 @@ const (
 	codeSuccess uint32 = iota
 	codeInvalidFormat
 	codeDatabaseErr
-	codeDupValue
+	codeDupValueErr
+	codeHashErr
 )

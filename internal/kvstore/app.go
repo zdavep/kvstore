@@ -2,7 +2,7 @@ package kvstore
 
 import (
 	"bytes"
-	"encoding/binary"
+	"crypto/sha256"
 	"fmt"
 
 	"github.com/dgraph-io/badger"
@@ -14,9 +14,6 @@ import (
 	"github.com/tendermint/tendermint/version"
 )
 
-// Last processed block height key
-var lastBlockHeightKey []byte = []byte("~kvstore.internal.v1.last_block_height")
-
 // App version
 var appVersion uint64 = 1
 
@@ -27,19 +24,21 @@ type App struct {
 	db     *badger.DB  // Key-value database
 	batch  *badger.Txn // Block transaction
 	height int64       // Current block height
+	state  *State      // Current state
 }
 
 // NewApp creates a new kvstore base application.
 func NewApp(db *badger.DB) abci.Application {
-	return &App{db: db}
+	return &App{db: db, state: readState(db)}
 }
 
 // Info returns the last processed block height and version info.
 func (app *App) Info(req abci.RequestInfo) abci.ResponseInfo {
 	return abci.ResponseInfo{
-		Version:         version.ABCIVersion,
-		AppVersion:      appVersion,
-		LastBlockHeight: app.lastProcessedHeight(),
+		Version:          version.ABCIVersion,
+		AppVersion:       appVersion,
+		LastBlockHeight:  app.state.Height,
+		LastBlockAppHash: app.state.Hash,
 	}
 }
 
@@ -77,21 +76,39 @@ func (app *App) DeliverTx(req abci.RequestDeliverTx) abci.ResponseDeliverTx {
 	if code := app.isValid(entries); code != codeSuccess {
 		return abci.ResponseDeliverTx{Code: code, Log: "error"}
 	}
-	// Store
+	// Set hash for updates
+	hsh := sha256.New()
+	if _, err := hsh.Write(app.state.Hash); err != nil {
+		app.log.Error("unable to initialize state hash udpate", "err", err)
+		return abci.ResponseDeliverTx{Code: codeHashErr, Log: "error"}
+	}
+	// Store entries
 	for _, e := range entries.Entries {
 		if err := app.batch.Set(e.Key, e.Value); err != nil {
 			app.log.Error("unable to set value", "err", err)
 			return abci.ResponseDeliverTx{Code: codeDatabaseErr, Log: "error"}
 		}
+		if _, err := hsh.Write(e.Value); err != nil {
+			app.log.Error("unable to update app state hash", "err", err)
+			return abci.ResponseDeliverTx{Code: codeHashErr, Log: "error"}
+		}
 	}
-	app.snapshotHeight()
+	// Update state
+	app.state.Height = app.height
+	copy(app.state.Hash, hsh.Sum(nil))
 	return abci.ResponseDeliverTx{Log: "success"}
 }
 
 // Commit writes the current batch to the database.
 func (app *App) Commit() abci.ResponseCommit {
+	defer app.batch.Discard()
+	if err := writeState(app.batch, app.state); err != nil {
+		app.log.Error("error saving app state", "err", err)
+		panic(err)
+	}
 	if err := app.batch.Commit(); err != nil {
 		app.log.Error("error during transaction commit", "err", err)
+		panic(err)
 	}
 	return abci.ResponseCommit{}
 }
@@ -100,7 +117,7 @@ func (app *App) Commit() abci.ResponseCommit {
 func (app *App) Query(req abci.RequestQuery) (res abci.ResponseQuery) {
 	res.Key = req.Data
 	var err error
-	if res.Value, err = app.get(req.Data); err != nil {
+	if res.Value, err = get(app.db, req.Data); err != nil {
 		app.log.Error("query error", "err", err)
 		res.Log = "exists:false"
 		return
@@ -113,52 +130,15 @@ func (app *App) Query(req abci.RequestQuery) (res abci.ResponseQuery) {
 func (app *App) isValid(entries *txfmt.Entries) uint32 {
 	// Check whether the key-value pair already exists.
 	for _, e := range entries.Entries {
-		existing, err := app.get(e.Key)
+		existing, err := get(app.db, e.Key)
 		if err != nil {
 			app.log.Error("db get error", "err", err)
 			return codeDatabaseErr
 		}
 		if existing != nil && bytes.Equal(e.Value, existing) {
 			app.log.Error("isValid", "msg", "value already exists")
-			return codeDupValue
+			return codeDupValueErr
 		}
 	}
 	return codeSuccess
-}
-
-// Get the value for a given key from the ABCI database.
-func (app *App) get(key []byte) (value []byte, err error) {
-	err = app.db.View(func(txn *badger.Txn) error {
-		item, e := txn.Get(key)
-		if e == badger.ErrKeyNotFound {
-			return nil
-		}
-		if e != nil {
-			return e
-		}
-		return item.Value(func(val []byte) error {
-			value = append([]byte{}, val...)
-			return nil
-		})
-	})
-	return
-}
-
-// Retreive the last processed block height from the ABCI database.
-func (app *App) lastProcessedHeight() (i int64) {
-	if val, err := app.get(lastBlockHeightKey); err == nil {
-		if i, err = binary.ReadVarint(bytes.NewReader(val)); err != nil {
-			app.log.Error("failed to get last processed block height", "err", err)
-		}
-	}
-	return
-}
-
-// Save the current block height to the ABCI database.
-func (app *App) snapshotHeight() {
-	buf := make([]byte, 8)
-	binary.PutVarint(buf, app.height)
-	if err := app.batch.Set(lastBlockHeightKey, buf); err != nil {
-		app.log.Error("failed to snapshot block height", "err", err)
-	}
 }
