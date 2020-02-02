@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -12,7 +13,6 @@ import (
 
 	"github.com/dgraph-io/badger"
 	"github.com/spf13/viper"
-
 	abci "github.com/tendermint/tendermint/abci/types"
 	cfg "github.com/tendermint/tendermint/config"
 	tmflags "github.com/tendermint/tendermint/libs/cli/flags"
@@ -21,6 +21,8 @@ import (
 	"github.com/tendermint/tendermint/p2p"
 	"github.com/tendermint/tendermint/privval"
 	"github.com/tendermint/tendermint/proxy"
+
+	_ "net/http/pprof"
 )
 
 var configFile = flag.String("config", "", "Path to config.toml")
@@ -52,6 +54,13 @@ func main() {
 		}
 		node.Wait()
 	}()
+	if os.Getenv("PPROF") != "" {
+		go func() {
+			if err := http.ListenAndServe(":6060", nil); err != nil {
+				fmt.Fprintf(os.Stderr, "failed to start http server: %v", err)
+			}
+		}()
+	}
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 	<-c
