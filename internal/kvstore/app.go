@@ -95,7 +95,9 @@ func (app *App) DeliverTx(req abci.RequestDeliverTx) abci.ResponseDeliverTx {
 	}
 	// Update state
 	app.state.Height = app.height
-	copy(app.state.Hash, hsh.Sum(nil))
+	sum := hsh.Sum(nil)
+	app.state.Hash = make([]byte, len(sum))
+	copy(app.state.Hash, sum)
 	return abci.ResponseDeliverTx{Log: "success"}
 }
 
@@ -110,7 +112,7 @@ func (app *App) Commit() abci.ResponseCommit {
 		app.log.Error("error during transaction commit", "err", err)
 		panic(err)
 	}
-	return abci.ResponseCommit{}
+	return abci.ResponseCommit{Data: app.state.Hash}
 }
 
 // Query fetches the value for a key from the database.
