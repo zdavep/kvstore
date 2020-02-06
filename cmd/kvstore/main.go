@@ -11,7 +11,6 @@ import (
 
 	"github.com/zdavep/kvstore/internal/kvstore"
 
-	"github.com/dgraph-io/badger"
 	"github.com/spf13/viper"
 	abci "github.com/tendermint/tendermint/abci/types"
 	cfg "github.com/tendermint/tendermint/config"
@@ -21,6 +20,7 @@ import (
 	"github.com/tendermint/tendermint/p2p"
 	"github.com/tendermint/tendermint/privval"
 	"github.com/tendermint/tendermint/proxy"
+	tmdb "github.com/tendermint/tm-db"
 
 	_ "net/http/pprof"
 )
@@ -33,11 +33,7 @@ func main() {
 		flag.PrintDefaults()
 		os.Exit(1)
 	}
-	db, err := badger.Open(badger.DefaultOptions("data/kvstore.db"))
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to open badger db: %v", err)
-		os.Exit(1)
-	}
+	db := tmdb.NewDB("kvstore", tmdb.CLevelDBBackend, "data/kvstore.db")
 	defer db.Close()
 	app := kvstore.NewApp(db)
 	node, err := newTendermint(app, *configFile)

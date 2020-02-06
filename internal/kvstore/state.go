@@ -1,8 +1,10 @@
 package kvstore
 
-import "github.com/dgraph-io/badger"
+import (
+	"encoding/json"
 
-import "encoding/json"
+	tmdb "github.com/tendermint/tm-db"
+)
 
 // The key to store app state under.
 const stateKey string = "~kvstore.internal.state.v1"
@@ -16,8 +18,8 @@ type State struct {
 }
 
 // Reads the current application state from a badger database.
-func readState(db *badger.DB) *State {
-	value, err := get(db, []byte(stateKey))
+func readState(db tmdb.DB) *State {
+	value, err := db.Get([]byte(stateKey))
 	if err != nil {
 		panic(err)
 	}
@@ -32,13 +34,11 @@ func readState(db *badger.DB) *State {
 }
 
 // Writes the current application state to a badger transaction.
-func writeState(txn *badger.Txn, s *State) error {
+func writeState(txn tmdb.Batch, s *State) error {
 	stateJSON, err := json.Marshal(s)
 	if err != nil {
 		return err
 	}
-	if err := txn.Set([]byte(stateKey), stateJSON); err != nil {
-		return err
-	}
+	txn.Set([]byte(stateKey), stateJSON)
 	return nil
 }

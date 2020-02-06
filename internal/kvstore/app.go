@@ -5,13 +5,13 @@ import (
 	"crypto/sha256"
 	"fmt"
 
-	"github.com/dgraph-io/badger"
 	"github.com/golang/protobuf/proto"
 	txfmt "github.com/zdavep/kvstore-txfmt"
 
 	abci "github.com/tendermint/tendermint/abci/types"
 	"github.com/tendermint/tendermint/libs/log"
 	"github.com/tendermint/tendermint/version"
+	tmdb "github.com/tendermint/tm-db"
 )
 
 // App version
@@ -20,15 +20,15 @@ var appVersion uint64 = 1
 // App is the kvstore base application.
 type App struct {
 	abci.BaseApplication
-	log    log.Logger  // Logging
-	db     *badger.DB  // Key-value database
-	batch  *badger.Txn // Block transaction
-	height int64       // Current block height
-	state  *State      // Current state
+	log    log.Logger // Logging
+	db     tmdb.DB    // Tendermint key-value database
+	batch  tmdb.Batch // Current block transaction
+	height int64      // Current block height
+	state  *State     // Current state
 }
 
 // NewApp creates a new kvstore base application.
-func NewApp(db *badger.DB) abci.Application {
+func NewApp(db tmdb.DB) abci.Application {
 	return &App{db: db, state: readState(db)}
 }
 
@@ -59,7 +59,7 @@ func (app *App) CheckTx(req abci.RequestCheckTx) abci.ResponseCheckTx {
 
 // BeginBlock starts a new database transaction.
 func (app *App) BeginBlock(req abci.RequestBeginBlock) abci.ResponseBeginBlock {
-	app.batch = app.db.NewTransaction(true)
+	app.batch = app.db.NewBatch()
 	app.height = req.Header.Height
 	return abci.ResponseBeginBlock{}
 }
@@ -84,10 +84,7 @@ func (app *App) DeliverTx(req abci.RequestDeliverTx) abci.ResponseDeliverTx {
 	}
 	// Store entries
 	for _, e := range entries.Entries {
-		if err := app.batch.Set(e.Key, e.Value); err != nil {
-			app.log.Error("unable to set value", "err", err)
-			return abci.ResponseDeliverTx{Code: codeDatabaseErr, Log: "error"}
-		}
+		app.batch.Set(e.Key, e.Value)
 		if _, err := hsh.Write(e.Value); err != nil {
 			app.log.Error("unable to update app state hash", "err", err)
 			return abci.ResponseDeliverTx{Code: codeHashErr, Log: "error"}
@@ -103,13 +100,13 @@ func (app *App) DeliverTx(req abci.RequestDeliverTx) abci.ResponseDeliverTx {
 
 // Commit writes the current batch to the database.
 func (app *App) Commit() abci.ResponseCommit {
-	defer app.batch.Discard()
+	defer app.batch.Close()
 	if err := writeState(app.batch, app.state); err != nil {
 		app.log.Error("error saving app state", "err", err)
 		panic(err)
 	}
-	if err := app.batch.Commit(); err != nil {
-		app.log.Error("error during transaction commit", "err", err)
+	if err := app.batch.Write(); err != nil {
+		app.log.Error("error during batch write", "err", err)
 		panic(err)
 	}
 	return abci.ResponseCommit{Data: app.state.Hash}
@@ -119,7 +116,7 @@ func (app *App) Commit() abci.ResponseCommit {
 func (app *App) Query(req abci.RequestQuery) (res abci.ResponseQuery) {
 	res.Key = req.Data
 	var err error
-	if res.Value, err = get(app.db, req.Data); err != nil {
+	if res.Value, err = app.db.Get(req.Data); err != nil {
 		app.log.Error("query error", "err", err)
 		res.Log = "exists:false"
 		return
@@ -132,7 +129,7 @@ func (app *App) Query(req abci.RequestQuery) (res abci.ResponseQuery) {
 func (app *App) isValid(entries *txfmt.Entries) uint32 {
 	// Check whether the key-value pair already exists.
 	for _, e := range entries.Entries {
-		existing, err := get(app.db, e.Key)
+		existing, err := app.db.Get(e.Key)
 		if err != nil {
 			app.log.Error("db get error", "err", err)
 			return codeDatabaseErr
