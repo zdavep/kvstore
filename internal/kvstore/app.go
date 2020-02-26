@@ -45,16 +45,19 @@ func (app *App) Info(req abci.RequestInfo) abci.ResponseInfo {
 // CheckTx determines whether a transaction can be committed.
 func (app *App) CheckTx(req abci.RequestCheckTx) abci.ResponseCheckTx {
 	// Decode transaction
-	entries := &txfmt.Entries{}
-	if err := proto.Unmarshal(req.Tx, entries); err != nil {
+	entries := txfmt.Entries{}
+	if err := proto.Unmarshal(req.Tx, &entries); err != nil {
 		app.log.Error("failed to unmarshal tx", "err", err)
-		return abci.ResponseCheckTx{Code: codeInvalidFormat, Log: "error"}
+		return abci.ResponseCheckTx{
+			Code: codeInvalidFormat,
+			Log:  logForCode(codeInvalidFormat),
+		}
 	}
 	// Validate
 	if code := app.isValid(entries); code != codeSuccess {
-		return abci.ResponseCheckTx{Code: code, Log: "error"}
+		return abci.ResponseCheckTx{Code: code, Log: logForCode(code)}
 	}
-	return abci.ResponseCheckTx{Log: "success"}
+	return abci.ResponseCheckTx{Log: logForCode(codeSuccess)}
 }
 
 // BeginBlock starts a new database transaction.
@@ -67,27 +70,27 @@ func (app *App) BeginBlock(req abci.RequestBeginBlock) abci.ResponseBeginBlock {
 // DeliverTx sets a key-value pair in the current transaction.
 func (app *App) DeliverTx(req abci.RequestDeliverTx) abci.ResponseDeliverTx {
 	// Decode transaction
-	entries := &txfmt.Entries{}
-	if err := proto.Unmarshal(req.Tx, entries); err != nil {
+	entries := txfmt.Entries{}
+	if err := proto.Unmarshal(req.Tx, &entries); err != nil {
 		app.log.Error("failed to unmarshal tx", "err", err)
-		return abci.ResponseDeliverTx{Code: codeInvalidFormat, Log: "error"}
+		return abci.ResponseDeliverTx{Code: codeInvalidFormat, Log: logForCode(codeInvalidFormat)}
 	}
 	// Validate
 	if code := app.isValid(entries); code != codeSuccess {
-		return abci.ResponseDeliverTx{Code: code, Log: "error"}
+		return abci.ResponseDeliverTx{Code: code, Log: logForCode(code)}
 	}
 	// Set hash for updates
 	hsh := sha256.New()
 	if _, err := hsh.Write(app.state.Hash); err != nil {
 		app.log.Error("unable to initialize state hash udpate", "err", err)
-		return abci.ResponseDeliverTx{Code: codeHashErr, Log: "error"}
+		return abci.ResponseDeliverTx{Code: codeHashErr, Log: logForCode(codeHashErr)}
 	}
 	// Store entries
 	for _, e := range entries.Entries {
 		app.batch.Set(e.Key, e.Value)
 		if _, err := hsh.Write(e.Value); err != nil {
 			app.log.Error("unable to update app state hash", "err", err)
-			return abci.ResponseDeliverTx{Code: codeHashErr, Log: "error"}
+			return abci.ResponseDeliverTx{Code: codeHashErr, Log: logForCode(codeHashErr)}
 		}
 	}
 	// Update state
@@ -95,7 +98,7 @@ func (app *App) DeliverTx(req abci.RequestDeliverTx) abci.ResponseDeliverTx {
 	sum := hsh.Sum(nil)
 	app.state.Hash = make([]byte, len(sum))
 	copy(app.state.Hash, sum)
-	return abci.ResponseDeliverTx{Log: "success"}
+	return abci.ResponseDeliverTx{Log: logForCode(codeSuccess)}
 }
 
 // Commit writes the current batch to the database.
@@ -126,7 +129,7 @@ func (app *App) Query(req abci.RequestQuery) (res abci.ResponseQuery) {
 }
 
 // Determine whether a value can committed.
-func (app *App) isValid(entries *txfmt.Entries) uint32 {
+func (app *App) isValid(entries txfmt.Entries) uint32 {
 	// Check whether the key-value pair already exists.
 	for _, e := range entries.Entries {
 		existing, err := app.db.Get(e.Key)

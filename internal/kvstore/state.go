@@ -17,7 +17,7 @@ type State struct {
 	Hash []byte
 }
 
-// Reads the current application state from a badger database.
+// Reads the current application state from a KV database.
 func readState(db tmdb.DB) *State {
 	value, err := db.Get([]byte(stateKey))
 	if err != nil {
@@ -33,7 +33,7 @@ func readState(db tmdb.DB) *State {
 	return s
 }
 
-// Writes the current application state to a badger transaction.
+// Writes the current application state to a KV batch.
 func writeState(txn tmdb.Batch, s *State) error {
 	stateJSON, err := json.Marshal(s)
 	if err != nil {
