@@ -1,15 +1,15 @@
-.PHONY: build
-build: fmt compile lint 
+.PHONY: docker fmt build lint 
+
+all: docker
+
+docker: fmt build lint 
 	docker build -t kvstore .
 
-.PHONY: fmt
 fmt:
 	gofmt -l -w internal/**/*.go cmd/**/*.go
 
-.PHONY: compile
-compile:
+build:
 	go build ./...
 
-.PHONY: lint 
 lint:
 	golangci-lint run 
