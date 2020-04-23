@@ -3,7 +3,6 @@ package main
 import (
 	"flag"
 	"fmt"
-	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -12,8 +11,6 @@ import (
 	tmnode "github.com/zdavep/kvstore/internal/tm/node"
 
 	tmdb "github.com/tendermint/tm-db"
-
-	_ "net/http/pprof"
 )
 
 var configFile = flag.String("config", "", "Path to config.toml")
@@ -41,13 +38,6 @@ func main() {
 		}
 		node.Wait()
 	}()
-	if os.Getenv("PPROF") != "" {
-		go func() {
-			if err := http.ListenAndServe(":6060", nil); err != nil {
-				fmt.Fprintf(os.Stderr, "failed to start http server: %v", err)
-			}
-		}()
-	}
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 	<-c
