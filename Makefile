@@ -6,7 +6,7 @@ docker: fmt build lint
 	docker build -t kvstore .
 
 fmt:
-	gofmt -l -w internal/**/*.go cmd/**/*.go
+	gofmt -l -w -s internal/**/*.go cmd/**/*.go
 
 build:
 	go build ./...
