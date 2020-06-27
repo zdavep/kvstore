@@ -5,7 +5,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 
-	"github.com/golang/protobuf/proto"
+	"github.com/golang/protobuf/proto" // nolint
 	txfmt "github.com/zdavep/kvstore-txfmt"
 
 	abci "github.com/tendermint/tendermint/abci/types"

@@ -2,7 +2,7 @@
 
 all: docker
 
-docker: fmt build lint 
+docker: fmt build
 	docker build -t kvstore .
 
 fmt:
