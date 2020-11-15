@@ -98,7 +98,7 @@ func (app *App) DeliverTx(req abci.RequestDeliverTx) abci.ResponseDeliverTx {
 	sum := hsh.Sum(nil)
 	app.state.Hash = make([]byte, len(sum))
 	copy(app.state.Hash, sum)
-	return abci.ResponseDeliverTx{Log: logForCode(codeSuccess)}
+	return abci.ResponseDeliverTx{Code: codeSuccess, Log: logForCode(codeSuccess)}
 }
 
 // Commit writes the current batch to the database.
