@@ -21,7 +21,10 @@ func main() {
 		flag.PrintDefaults()
 		os.Exit(1)
 	}
-	db := tmdb.NewDB("kvstore", tmdb.CLevelDBBackend, "data/kvstore.db")
+	db, err := tmdb.NewDB("kvstore", tmdb.CLevelDBBackend, "data/kvstore.db")
+	if err != nil {
+		panic(err)
+	}
 	defer db.Close()
 	app := kvstore.NewApp(db)
 	node, err := tmnode.New(app, *configFile)
